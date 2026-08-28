@@ -17,6 +17,13 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Printf("aggregator: %v", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	brokers := flag.String("brokers", "localhost:9092", "comma-separated Kafka bootstrap brokers")
 	group := flag.String("group", "aggregator", "Kafka consumer group id")
 	clickTopic := flag.String("click-topic", "clickstream.events", "topic for click events")
@@ -35,14 +42,38 @@ func main() {
 
 	log.Printf("consuming %s and %s as group %q", *clickTopic, *orderTopic, *group)
 
+	events, errs := c.Run(ctx)
 	var n int
-	for event := range c.Run(ctx) {
-		n++
-		if event.Kind == consume.KindOrder {
-			log.Printf("%-5s %-12s %-14s $%.2f", event.Kind, event.ID, event.Category, event.Amount)
-		} else {
-			log.Printf("%-5s %-12s %-14s", event.Kind, event.ID, event.Category)
+	var failure error
+
+	for events != nil {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				events = nil
+				continue
+			}
+			n++
+			if event.Kind == consume.KindOrder {
+				log.Printf("%-5s %-12s %-14s $%.2f", event.Kind, event.ID, event.Category, event.Amount)
+			} else {
+				log.Printf("%-5s %-12s %-14s", event.Kind, event.ID, event.Category)
+			}
+
+		case err := <-errs:
+			if err == nil {
+				continue
+			}
+			// One reader failing leaves the other running on half the input,
+			// which looks healthy. Stop everything and exit non-zero so a
+			// supervisor restarts us instead of reading a clean exit.
+			if failure == nil {
+				failure = err
+			}
+			stop()
 		}
 	}
+
 	log.Printf("stopped after %d events", n)
+	return failure
 }
