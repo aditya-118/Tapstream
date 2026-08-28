@@ -17,3 +17,26 @@ lint:
 
 clean-gen:
 	rm -rf server/gen server/bin
+
+# --- Kafka ---------------------------------------------------------------
+KAFKA_BIN := docker compose exec -T kafka /opt/kafka/bin
+BOOTSTRAP := localhost:9092
+TOPICS := clickstream.events clickstream.orders
+
+.PHONY: kafka-up kafka-down topics topics-list
+
+kafka-up:
+	docker compose up -d --wait
+
+kafka-down:
+	docker compose down
+
+# Partitioned by category, so a category's events keep their relative order.
+topics:
+	@for t in $(TOPICS); do \
+	  $(KAFKA_BIN)/kafka-topics.sh --bootstrap-server $(BOOTSTRAP) \
+	    --create --if-not-exists --topic $$t --partitions 3 --replication-factor 1; \
+	done
+
+topics-list:
+	@$(KAFKA_BIN)/kafka-topics.sh --bootstrap-server $(BOOTSTRAP) --list
