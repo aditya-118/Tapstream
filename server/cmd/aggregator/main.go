@@ -1,16 +1,14 @@
-// Command aggregator consumes clickstream events from Kafka and folds them
-// into sliding-window rollups.
-//
-// At this stage the rollups are printed once a second; the streaming API is
-// layered on next.
+// Command aggregator consumes clickstream events from Kafka, folds them into
+// sliding-window rollups, and streams those rollups to dashboard clients.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"maps"
+	"net/http"
 	"os"
 	"os/signal"
 	"slices"
@@ -18,8 +16,15 @@ import (
 	"syscall"
 	"time"
 
+	connectcors "connectrpc.com/cors"
+	pb "github.com/adityabansal/tapstream/server/gen/tapstream/v1"
+	"github.com/adityabansal/tapstream/server/gen/tapstream/v1/tapstreamv1connect"
+	"github.com/adityabansal/tapstream/server/internal/broadcast"
 	"github.com/adityabansal/tapstream/server/internal/consume"
+	"github.com/adityabansal/tapstream/server/internal/server"
 	"github.com/adityabansal/tapstream/server/internal/window"
+	"github.com/rs/cors"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func main() {
@@ -34,6 +39,9 @@ func run() error {
 	group := flag.String("group", "aggregator", "Kafka consumer group id")
 	clickTopic := flag.String("click-topic", "clickstream.events", "topic for click events")
 	orderTopic := flag.String("order-topic", "clickstream.orders", "topic for order events")
+	addr := flag.String("addr", ":8080", "address to serve the streaming API on")
+	origin := flag.String("allowed-origin", "http://localhost:3000", "CORS allowed origin, or * for any")
+	verbose := flag.Bool("v", false, "log each snapshot")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -46,6 +54,25 @@ func run() error {
 		OrderTopic: *orderTopic,
 	}
 	registry := window.NewRegistry()
+	broadcaster := broadcast.New()
+
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           withCORS(dashboardHandler(broadcaster), *origin),
+		ReadHeaderTimeout: 10 * time.Second,
+		// No WriteTimeout: these responses are long-lived streams.
+	}
+	go func() {
+		log.Printf("serving DashboardService on %s (allowed origin %s)", *addr, *origin)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("serve: %v", err)
+		}
+	}()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
 
 	log.Printf("consuming %s and %s as group %q", *clickTopic, *orderTopic, *group)
 
@@ -55,6 +82,12 @@ func run() error {
 
 	var failure error
 	var staleSince time.Time
+	fail := func(err error) {
+		if failure == nil {
+			failure = err
+		}
+		stop()
+	}
 
 	for events != nil {
 		select {
@@ -79,21 +112,48 @@ func run() error {
 			}
 
 		case err := <-errs:
-			if err == nil {
-				continue
+			if err != nil {
+				// One reader failing leaves the other running on half the
+				// input, which looks healthy. Stop everything and exit
+				// non-zero.
+				fail(err)
 			}
-			// One reader failing leaves the other running on half the input,
-			// which looks healthy. Stop everything and exit non-zero.
-			if failure == nil {
-				failure = err
-			}
-			stop()
 
 		case now := <-ticker.C:
-			report(registry, now)
+			update := snapshot(registry, now)
+			if dropped := broadcaster.Publish(update); dropped > 0 {
+				log.Printf("dropped update for %d slow subscriber(s)", dropped)
+			}
+			if *verbose {
+				log.Printf("%d subscriber(s): %.1f clicks/s, %.1f orders/s, $%.2f/s",
+					broadcaster.Len(), update.GetTotal().GetClicksPerSec(),
+					update.GetTotal().GetOrdersPerSec(), update.GetTotal().GetRevenuePerSec())
+			}
 		}
 	}
 	return failure
+}
+
+func dashboardHandler(b *broadcast.Broadcaster) http.Handler {
+	mux := http.NewServeMux()
+	path, handler := tapstreamv1connect.NewDashboardServiceHandler(server.NewDashboard(b))
+	mux.Handle(path, handler)
+	return mux
+}
+
+// withCORS is required for a browser on another origin to reach this API at
+// all: without it the preflight fails before any RPC is attempted. Connect
+// needs its own header allow-lists, which the connectcors package supplies.
+//
+// Served over HTTP/1.1, where Connect streams via chunked responses. Browsers
+// require TLS for HTTP/2, so h2c would only help non-browser clients.
+func withCORS(h http.Handler, origin string) http.Handler {
+	return cors.New(cors.Options{
+		AllowedOrigins: []string{origin},
+		AllowedMethods: connectcors.AllowedMethods(),
+		AllowedHeaders: connectcors.AllowedHeaders(),
+		ExposedHeaders: connectcors.ExposedHeaders(),
+	}).Handler(h)
 }
 
 // warnIfStale reports when consumed events are older than the window, which
@@ -112,27 +172,34 @@ func warnIfStale(event consume.Event, now, staleSince time.Time) time.Time {
 	return staleSince
 }
 
-// report prints the trailing-window rollup.
-func report(r *window.Registry, now time.Time) {
+// snapshot converts the registry's trailing-window totals into one update.
+func snapshot(r *window.Registry, now time.Time) *pb.DashboardUpdate {
 	byCategory, total := r.Snapshot(now)
-	if len(byCategory) == 0 {
-		log.Printf("%ds window: idle", window.Size)
-		return
-	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "%ds window: %.1f clicks/s, %.1f orders/s, $%.2f/s\n",
-		window.Size, perSecond(total.Clicks), perSecond(total.Orders), total.Revenue/window.Size)
-	for _, category := range slices.Sorted(maps.Keys(byCategory)) {
-		t := byCategory[category]
-		fmt.Fprintf(&b, "    %-12s %7.1f clicks/s %6.1f orders/s %10.2f $/s\n",
-			category, perSecond(t.Clicks), perSecond(t.Orders), t.Revenue/window.Size)
+	// Stable order so the dashboard's series do not jump.
+	categories := slices.Sorted(maps.Keys(byCategory))
+
+	update := &pb.DashboardUpdate{
+		Ts:            timestamppb.New(now),
+		WindowSeconds: window.Size,
+		Total:         stats("", total),
+		Categories:    make([]*pb.CategoryStats, 0, len(categories)),
 	}
-	log.Print(b.String())
+	for _, category := range categories {
+		update.Categories = append(update.Categories, stats(category, byCategory[category]))
+	}
+	return update
 }
 
-// perSecond averages a window total over the window length. The current
-// second's bucket is only partially elapsed, so this reads up to 1.7% low -
-// a constant offset within a run that shifts between runs, which is worth
-// knowing before chasing it as a bug.
-func perSecond(n int64) float64 { return float64(n) / window.Size }
+// stats averages a window total over the window length. The current second's
+// bucket is only partially elapsed, so rates read up to 1.7% low - a constant
+// offset within a run that shifts between runs, which is worth knowing before
+// chasing it as a bug.
+func stats(category string, t window.Totals) *pb.CategoryStats {
+	return &pb.CategoryStats{
+		Category:      category,
+		ClicksPerSec:  float64(t.Clicks) / window.Size,
+		OrdersPerSec:  float64(t.Orders) / window.Size,
+		RevenuePerSec: t.Revenue / window.Size,
+	}
+}

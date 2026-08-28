@@ -9,6 +9,8 @@ tool (
 
 require (
 	connectrpc.com/connect v1.20.0
+	connectrpc.com/cors v0.1.0
+	github.com/rs/cors v1.11.1
 	github.com/segmentio/kafka-go v0.4.51
 	google.golang.org/protobuf v1.36.12
 )
