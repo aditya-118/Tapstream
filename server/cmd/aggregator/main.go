@@ -10,9 +10,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"os/signal"
-	"sort"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -53,6 +54,7 @@ func run() error {
 	defer ticker.Stop()
 
 	var failure error
+	var staleSince time.Time
 
 	for events != nil {
 		select {
@@ -62,13 +64,18 @@ func run() error {
 				continue
 			}
 			// Bucketed by arrival, not by the event's own timestamp: see the
-			// note in the window package.
+			// note in the window package. That makes a backlog indistinguishable
+			// from live traffic in the numbers, so say so out loud instead.
 			now := time.Now()
+			staleSince = warnIfStale(event, now, staleSince)
+
 			switch event.Kind {
 			case consume.KindOrder:
 				registry.RecordOrder(now, event.Category, event.Amount)
-			default:
+			case consume.KindClick:
 				registry.RecordClick(now, event.Category)
+			default:
+				log.Printf("ignoring unknown event kind %v", event.Kind)
 			}
 
 		case err := <-errs:
@@ -89,6 +96,22 @@ func run() error {
 	return failure
 }
 
+// warnIfStale reports when consumed events are older than the window, which
+// happens when a restarted group drains a backlog. Those events land in the
+// current arrival buckets and inflate the reported rate until they age out.
+// Logged at most once per stale period to keep the drain from flooding stderr.
+func warnIfStale(event consume.Event, now, staleSince time.Time) time.Time {
+	age := now.Sub(event.Ts)
+	if event.Ts.IsZero() || age < window.Size*time.Second {
+		return time.Time{}
+	}
+	if staleSince.IsZero() {
+		log.Printf("consuming a backlog: events are %s old, so rates will read high until it drains", age.Truncate(time.Second))
+		return now
+	}
+	return staleSince
+}
+
 // report prints the trailing-window rollup.
 func report(r *window.Registry, now time.Time) {
 	byCategory, total := r.Snapshot(now)
@@ -100,13 +123,7 @@ func report(r *window.Registry, now time.Time) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%ds window: %.1f clicks/s, %.1f orders/s, $%.2f/s\n",
 		window.Size, perSecond(total.Clicks), perSecond(total.Orders), total.Revenue/window.Size)
-	categories := make([]string, 0, len(byCategory))
-	for category := range byCategory {
-		categories = append(categories, category)
-	}
-	sort.Strings(categories)
-
-	for _, category := range categories {
+	for _, category := range slices.Sorted(maps.Keys(byCategory)) {
 		t := byCategory[category]
 		fmt.Fprintf(&b, "    %-12s %7.1f clicks/s %6.1f orders/s %10.2f $/s\n",
 			category, perSecond(t.Clicks), perSecond(t.Orders), t.Revenue/window.Size)
@@ -114,4 +131,8 @@ func report(r *window.Registry, now time.Time) {
 	log.Print(b.String())
 }
 
+// perSecond averages a window total over the window length. The current
+// second's bucket is only partially elapsed, so this reads up to 1.7% low -
+// a constant offset within a run that shifts between runs, which is worth
+// knowing before chasing it as a bug.
 func perSecond(n int64) float64 { return float64(n) / window.Size }

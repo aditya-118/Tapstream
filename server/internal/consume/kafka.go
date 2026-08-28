@@ -93,7 +93,9 @@ func (c *Consumer) start(
 			Topic:   topic,
 			// Only applies to partitions with no committed offset. A new
 			// group starts at the live edge instead of replaying history
-			// into a 60-second window; an existing group still resumes.
+			// into a 60-second window. It does nothing for a group that
+			// restarts with lag, which still drains its backlog - see the
+			// staleness check in the aggregator.
 			StartOffset: kafka.LastOffset,
 			// Surfaces rebalances and commit retries, which are most of what
 			// is interesting about running in a consumer group.
