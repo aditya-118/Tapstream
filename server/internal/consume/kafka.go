@@ -91,6 +91,10 @@ func (c *Consumer) start(
 			Brokers: c.Brokers,
 			GroupID: c.GroupID,
 			Topic:   topic,
+			// Only applies to partitions with no committed offset. A new
+			// group starts at the live edge instead of replaying history
+			// into a 60-second window; an existing group still resumes.
+			StartOffset: kafka.LastOffset,
 			// Surfaces rebalances and commit retries, which are most of what
 			// is interesting about running in a consumer group.
 			ErrorLogger: kafka.LoggerFunc(log.Printf),

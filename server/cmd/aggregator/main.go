@@ -1,19 +1,24 @@
-// Command aggregator consumes clickstream events from Kafka.
+// Command aggregator consumes clickstream events from Kafka and folds them
+// into sliding-window rollups.
 //
-// At this stage it only decodes and logs them; windowed aggregation and the
-// streaming API are layered on next.
+// At this stage the rollups are printed once a second; the streaming API is
+// layered on next.
 package main
 
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/adityabansal/tapstream/server/internal/consume"
+	"github.com/adityabansal/tapstream/server/internal/window"
 )
 
 func main() {
@@ -39,11 +44,14 @@ func run() error {
 		ClickTopic: *clickTopic,
 		OrderTopic: *orderTopic,
 	}
+	registry := window.NewRegistry()
 
 	log.Printf("consuming %s and %s as group %q", *clickTopic, *orderTopic, *group)
 
 	events, errs := c.Run(ctx)
-	var n int
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
 	var failure error
 
 	for events != nil {
@@ -53,11 +61,14 @@ func run() error {
 				events = nil
 				continue
 			}
-			n++
-			if event.Kind == consume.KindOrder {
-				log.Printf("%-5s %-12s %-14s $%.2f", event.Kind, event.ID, event.Category, event.Amount)
-			} else {
-				log.Printf("%-5s %-12s %-14s", event.Kind, event.ID, event.Category)
+			// Bucketed by arrival, not by the event's own timestamp: see the
+			// note in the window package.
+			now := time.Now()
+			switch event.Kind {
+			case consume.KindOrder:
+				registry.RecordOrder(now, event.Category, event.Amount)
+			default:
+				registry.RecordClick(now, event.Category)
 			}
 
 		case err := <-errs:
@@ -65,15 +76,42 @@ func run() error {
 				continue
 			}
 			// One reader failing leaves the other running on half the input,
-			// which looks healthy. Stop everything and exit non-zero so a
-			// supervisor restarts us instead of reading a clean exit.
+			// which looks healthy. Stop everything and exit non-zero.
 			if failure == nil {
 				failure = err
 			}
 			stop()
+
+		case now := <-ticker.C:
+			report(registry, now)
 		}
 	}
-
-	log.Printf("stopped after %d events", n)
 	return failure
 }
+
+// report prints the trailing-window rollup.
+func report(r *window.Registry, now time.Time) {
+	byCategory, total := r.Snapshot(now)
+	if len(byCategory) == 0 {
+		log.Printf("%ds window: idle", window.Size)
+		return
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%ds window: %.1f clicks/s, %.1f orders/s, $%.2f/s\n",
+		window.Size, perSecond(total.Clicks), perSecond(total.Orders), total.Revenue/window.Size)
+	categories := make([]string, 0, len(byCategory))
+	for category := range byCategory {
+		categories = append(categories, category)
+	}
+	sort.Strings(categories)
+
+	for _, category := range categories {
+		t := byCategory[category]
+		fmt.Fprintf(&b, "    %-12s %7.1f clicks/s %6.1f orders/s %10.2f $/s\n",
+			category, perSecond(t.Clicks), perSecond(t.Orders), t.Revenue/window.Size)
+	}
+	log.Print(b.String())
+}
+
+func perSecond(n int64) float64 { return float64(n) / window.Size }
