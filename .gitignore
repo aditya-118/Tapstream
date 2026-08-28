@@ -1,0 +1,19 @@
+# Go
+server/bin/
+*.test
+*.out
+
+# Node
+node_modules/
+web/.next/
+web/out/
+*.tsbuildinfo
+
+# Editors
+.idea/
+.vscode/
+.DS_Store
+
+# Local env
+.env
+.env.local
