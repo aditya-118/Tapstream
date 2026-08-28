@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -45,6 +47,8 @@ func run() error {
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Runs before the server shutdown deferred below, so a second Ctrl-C
+	// during shutdown kills the process instead of being swallowed.
 	defer stop()
 
 	c := &consume.Consumer{
@@ -60,12 +64,21 @@ func run() error {
 		Addr:              *addr,
 		Handler:           withCORS(dashboardHandler(broadcaster), *origin),
 		ReadHeaderTimeout: 10 * time.Second,
-		// No WriteTimeout: these responses are long-lived streams.
+		IdleTimeout:       2 * time.Minute,
+		// No WriteTimeout: these responses are long-lived streams. The
+		// handler sets a per-send deadline instead.
+		//
+		// Streams end when their request context is cancelled, which happens
+		// when the base context is cancelled on shutdown.
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
+	serveErr := make(chan error, 1)
 	go func() {
 		log.Printf("serving DashboardService on %s (allowed origin %s)", *addr, *origin)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("serve: %v", err)
+			// Reported rather than fatal, so the deferred Kafka reader
+			// shutdown still runs and the consumer group is left cleanly.
+			serveErr <- fmt.Errorf("serve: %w", err)
 		}
 	}()
 	defer func() {
@@ -119,6 +132,9 @@ func run() error {
 				fail(err)
 			}
 
+		case err := <-serveErr:
+			fail(err)
+
 		case now := <-ticker.C:
 			update := snapshot(registry, now)
 			if dropped := broadcaster.Publish(update); dropped > 0 {
@@ -138,7 +154,7 @@ func dashboardHandler(b *broadcast.Broadcaster) http.Handler {
 	mux := http.NewServeMux()
 	path, handler := tapstreamv1connect.NewDashboardServiceHandler(server.NewDashboard(b))
 	mux.Handle(path, handler)
-	return mux
+	return server.WithWriteDeadlines(mux)
 }
 
 // withCORS is required for a browser on another origin to reach this API at
@@ -153,6 +169,9 @@ func withCORS(h http.Handler, origin string) http.Handler {
 		AllowedMethods: connectcors.AllowedMethods(),
 		AllowedHeaders: connectcors.AllowedHeaders(),
 		ExposedHeaders: connectcors.ExposedHeaders(),
+		// Without this browsers re-run the preflight every few seconds, so
+		// each stream reconnect pays an extra round trip.
+		MaxAge: int((2 * time.Hour).Seconds()),
 	}).Handler(h)
 }
 
