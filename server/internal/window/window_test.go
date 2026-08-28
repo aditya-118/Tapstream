@@ -45,10 +45,30 @@ func TestSumWindowBoundary(t *testing.T) {
 func TestBucketReusedNextMinuteIsCleared(t *testing.T) {
 	var s Stats
 	s.RecordClick(at(0))
+	s.RecordOrder(at(0), 100)
 	s.RecordClick(at(Size)) // same ring index as at(0), one minute later
+	s.RecordOrder(at(Size), 5)
 
-	if got := s.Sum(at(Size)); got.Clicks != 1 {
-		t.Errorf("Clicks = %d, want 1 (the stale second must not be counted)", got.Clicks)
+	// Every field must be cleared, not just the one the ring is indexed by.
+	got := s.Sum(at(Size))
+	want := Totals{Clicks: 1, Orders: 1, Revenue: 5}
+	if got != want {
+		t.Errorf("Sum = %+v, want %+v (the stale second must not be counted)", got, want)
+	}
+}
+
+// Reading at a time before the recorded second - what a backward clock step
+// produces - must not count buckets stamped in the future.
+func TestClockStepBackwardExcludesFutureBuckets(t *testing.T) {
+	var s Stats
+	s.RecordClick(at(100))
+
+	if got := s.Sum(at(50)); got != (Totals{}) {
+		t.Errorf("Sum = %+v, want zero (the bucket is ahead of now)", got)
+	}
+	// Once the clock catches up the bucket counts again.
+	if got := s.Sum(at(100)); got.Clicks != 1 {
+		t.Errorf("Clicks = %d, want 1 once now has caught up", got.Clicks)
 	}
 }
 

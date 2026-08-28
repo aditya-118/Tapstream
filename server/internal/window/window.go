@@ -51,6 +51,10 @@ func (s *Stats) RecordOrder(now time.Time, amount float64) {
 
 // current returns the bucket for now, clearing it first if it still holds an
 // older second. Callers must hold s.mu.
+//
+// sec%Size assumes a clock at or after the epoch; a negative second would
+// index out of range. Not guarded, because reaching it requires a host clock
+// set before 1970.
 func (s *Stats) current(now time.Time) *bucket {
 	sec := now.Unix()
 	b := &s.buckets[sec%Size]
