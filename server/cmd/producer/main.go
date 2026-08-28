@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -40,6 +41,12 @@ func main() {
 		Addr:         kafka.TCP(strings.Split(*brokers, ",")...),
 		Topic:        *topic,
 		BatchTimeout: 10 * time.Millisecond,
+		// Must be set explicitly. A Writer struct literal leaves this at
+		// RequireNone, where kafka-go never reads the produce response and
+		// every write reports success - so a broker rejecting records looks
+		// identical to one accepting them. (The deprecated NewWriter path
+		// defaults to RequireAll, which is what makes this easy to miss.)
+		RequiredAcks: kafka.RequireAll,
 	}
 	defer w.Close()
 
@@ -93,11 +100,30 @@ func main() {
 					return
 				}
 				log.Printf("write: %v", err)
+				sent += written(err)
 				continue
 			}
 			sent += n
 		}
 	}
+}
+
+// written reports how many messages of a failed batch actually reached Kafka.
+// A batch spans several partitions, so a partial failure returns a WriteErrors
+// slice with a nil entry per message that succeeded; counting the whole batch
+// as lost would undercount.
+func written(err error) int {
+	var errs kafka.WriteErrors
+	if !errors.As(err, &errs) {
+		return 0
+	}
+	ok := 0
+	for _, e := range errs {
+		if e == nil {
+			ok++
+		}
+	}
+	return ok
 }
 
 func newClick(seq int) *pb.ClickEvent {
