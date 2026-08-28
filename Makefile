@@ -1,9 +1,10 @@
 SHELL := /bin/bash
 
 # Go protoc plugins, version-pinned in server/go.mod via `go get -tool`.
-GO_PLUGINS := google.golang.org/protobuf/cmd/protoc-gen-go
+GO_PLUGINS := google.golang.org/protobuf/cmd/protoc-gen-go \
+               connectrpc.com/connect/cmd/protoc-gen-connect-go
 
-.PHONY: tools proto-go lint clean-gen
+.PHONY: tools proto-go lint proto-breaking clean-gen
 
 # Build the pinned protoc plugins into server/bin so buf can find them on PATH.
 tools:
@@ -14,6 +15,11 @@ proto-go: tools
 
 lint:
 	npx buf lint
+
+# Field numbers are the wire contract, not names. Run before changing a proto
+# that already has clients.
+proto-breaking:
+	npx buf breaking --against '.git#branch=master'
 
 clean-gen:
 	rm -rf server/gen server/bin
