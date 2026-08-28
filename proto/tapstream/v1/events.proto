@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package tapstream.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ClickEvent is one page view in the simulated storefront.
+message ClickEvent {
+  string event_id = 1;
+  string session_id = 2;
+  string page = 3;
+  string category = 4;
+  google.protobuf.Timestamp ts = 5;
+}
+
+// OrderEvent is one completed purchase.
+message OrderEvent {
+  string order_id = 1;
+  string category = 2;
+  double amount = 3;
+  google.protobuf.Timestamp ts = 4;
+}
