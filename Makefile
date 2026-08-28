@@ -40,3 +40,12 @@ topics:
 
 topics-list:
 	@$(KAFKA_BIN)/kafka-topics.sh --bootstrap-server $(BOOTSTRAP) --list
+
+# --- Go ------------------------------------------------------------------
+.PHONY: test build
+
+test:
+	cd server && go test -race ./...
+
+build:
+	cd server && go build ./...
