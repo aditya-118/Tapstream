@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package tapstream.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// DashboardService streams live rollups to dashboard clients.
+service DashboardService {
+  // SubscribeUpdates streams one snapshot per aggregation tick until the
+  // client disconnects.
+  rpc SubscribeUpdates(SubscribeRequest) returns (stream DashboardUpdate);
+}
+
+message SubscribeRequest {
+  // Categories to include. Empty means all of them.
+  repeated string categories = 1;
+}
+
+// DashboardUpdate is a complete snapshot of the trailing window, so one
+// message renders one coherent frame.
+message DashboardUpdate {
+  google.protobuf.Timestamp ts = 1;
+
+  // Length of the trailing window the rates are averaged over, so clients do
+  // not have to hardcode it.
+  int64 window_seconds = 2;
+
+  // Sum of the categories included in this message, which for a filtered
+  // subscription is the sum of the filtered set rather than of all traffic.
+  CategoryStats total = 3;
+
+  repeated CategoryStats categories = 4;
+}
+
+message CategoryStats {
+  // Empty on the total.
+  string category = 1;
+
+  double clicks_per_sec = 2;
+  double orders_per_sec = 3;
+  double revenue_per_sec = 4;
+}

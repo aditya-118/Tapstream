@@ -1,7 +1,8 @@
 SHELL := /bin/bash
 
 # Go protoc plugins, version-pinned in server/go.mod via `go get -tool`.
-GO_PLUGINS := google.golang.org/protobuf/cmd/protoc-gen-go
+GO_PLUGINS := google.golang.org/protobuf/cmd/protoc-gen-go \
+               connectrpc.com/connect/cmd/protoc-gen-connect-go
 
 .PHONY: tools proto-go lint clean-gen
 
