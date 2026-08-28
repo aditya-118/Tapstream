@@ -42,7 +42,11 @@ const (
 type DashboardServiceClient interface {
 	// SubscribeUpdates streams one snapshot per aggregation tick until the
 	// client disconnects.
-	SubscribeUpdates(context.Context, *connect.Request[v1.SubscribeRequest]) (*connect.ServerStreamForClient[v1.DashboardUpdate], error)
+	//
+	// buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+	// The response is a stream element rather than a reply, and DashboardUpdate
+	// describes what it is better than SubscribeUpdatesResponse would.
+	SubscribeUpdates(context.Context, *connect.Request[v1.SubscribeUpdatesRequest]) (*connect.ServerStreamForClient[v1.DashboardUpdate], error)
 }
 
 // NewDashboardServiceClient constructs a client for the tapstream.v1.DashboardService service. By
@@ -56,7 +60,7 @@ func NewDashboardServiceClient(httpClient connect.HTTPClient, baseURL string, op
 	baseURL = strings.TrimRight(baseURL, "/")
 	dashboardServiceMethods := v1.File_tapstream_v1_dashboard_proto.Services().ByName("DashboardService").Methods()
 	return &dashboardServiceClient{
-		subscribeUpdates: connect.NewClient[v1.SubscribeRequest, v1.DashboardUpdate](
+		subscribeUpdates: connect.NewClient[v1.SubscribeUpdatesRequest, v1.DashboardUpdate](
 			httpClient,
 			baseURL+DashboardServiceSubscribeUpdatesProcedure,
 			connect.WithSchema(dashboardServiceMethods.ByName("SubscribeUpdates")),
@@ -67,11 +71,11 @@ func NewDashboardServiceClient(httpClient connect.HTTPClient, baseURL string, op
 
 // dashboardServiceClient implements DashboardServiceClient.
 type dashboardServiceClient struct {
-	subscribeUpdates *connect.Client[v1.SubscribeRequest, v1.DashboardUpdate]
+	subscribeUpdates *connect.Client[v1.SubscribeUpdatesRequest, v1.DashboardUpdate]
 }
 
 // SubscribeUpdates calls tapstream.v1.DashboardService.SubscribeUpdates.
-func (c *dashboardServiceClient) SubscribeUpdates(ctx context.Context, req *connect.Request[v1.SubscribeRequest]) (*connect.ServerStreamForClient[v1.DashboardUpdate], error) {
+func (c *dashboardServiceClient) SubscribeUpdates(ctx context.Context, req *connect.Request[v1.SubscribeUpdatesRequest]) (*connect.ServerStreamForClient[v1.DashboardUpdate], error) {
 	return c.subscribeUpdates.CallServerStream(ctx, req)
 }
 
@@ -79,7 +83,11 @@ func (c *dashboardServiceClient) SubscribeUpdates(ctx context.Context, req *conn
 type DashboardServiceHandler interface {
 	// SubscribeUpdates streams one snapshot per aggregation tick until the
 	// client disconnects.
-	SubscribeUpdates(context.Context, *connect.Request[v1.SubscribeRequest], *connect.ServerStream[v1.DashboardUpdate]) error
+	//
+	// buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+	// The response is a stream element rather than a reply, and DashboardUpdate
+	// describes what it is better than SubscribeUpdatesResponse would.
+	SubscribeUpdates(context.Context, *connect.Request[v1.SubscribeUpdatesRequest], *connect.ServerStream[v1.DashboardUpdate]) error
 }
 
 // NewDashboardServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -108,6 +116,6 @@ func NewDashboardServiceHandler(svc DashboardServiceHandler, opts ...connect.Han
 // UnimplementedDashboardServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedDashboardServiceHandler struct{}
 
-func (UnimplementedDashboardServiceHandler) SubscribeUpdates(context.Context, *connect.Request[v1.SubscribeRequest], *connect.ServerStream[v1.DashboardUpdate]) error {
+func (UnimplementedDashboardServiceHandler) SubscribeUpdates(context.Context, *connect.Request[v1.SubscribeUpdatesRequest], *connect.ServerStream[v1.DashboardUpdate]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("tapstream.v1.DashboardService.SubscribeUpdates is not implemented"))
 }

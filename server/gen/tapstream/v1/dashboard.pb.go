@@ -22,7 +22,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type SubscribeRequest struct {
+type SubscribeUpdatesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Categories to include. Empty means all of them.
 	Categories    []string `protobuf:"bytes,1,rep,name=categories,proto3" json:"categories,omitempty"`
@@ -30,20 +30,20 @@ type SubscribeRequest struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SubscribeRequest) Reset() {
-	*x = SubscribeRequest{}
+func (x *SubscribeUpdatesRequest) Reset() {
+	*x = SubscribeUpdatesRequest{}
 	mi := &file_tapstream_v1_dashboard_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SubscribeRequest) String() string {
+func (x *SubscribeUpdatesRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SubscribeRequest) ProtoMessage() {}
+func (*SubscribeUpdatesRequest) ProtoMessage() {}
 
-func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
+func (x *SubscribeUpdatesRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_tapstream_v1_dashboard_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -55,12 +55,12 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
-func (*SubscribeRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use SubscribeUpdatesRequest.ProtoReflect.Descriptor instead.
+func (*SubscribeUpdatesRequest) Descriptor() ([]byte, []int) {
 	return file_tapstream_v1_dashboard_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *SubscribeRequest) GetCategories() []string {
+func (x *SubscribeUpdatesRequest) GetCategories() []string {
 	if x != nil {
 		return x.Categories
 	}
@@ -77,7 +77,12 @@ type DashboardUpdate struct {
 	WindowSeconds int64 `protobuf:"varint,2,opt,name=window_seconds,json=windowSeconds,proto3" json:"window_seconds,omitempty"`
 	// Sum of the categories included in this message, which for a filtered
 	// subscription is the sum of the filtered set rather than of all traffic.
-	Total         *CategoryStats   `protobuf:"bytes,3,opt,name=total,proto3" json:"total,omitempty"`
+	Total *CategoryStats `protobuf:"bytes,3,opt,name=total,proto3" json:"total,omitempty"`
+	// Only categories with activity in the window. A category that goes quiet
+	// is omitted entirely and reappears on its next event, so an absent
+	// category means a rate of zero, not missing data. Clients plotting a
+	// series must union the keys they have seen and substitute zero, or the
+	// lines will break and rejoin.
 	Categories    []*CategoryStats `protobuf:"bytes,4,rep,name=categories,proto3" json:"categories,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -214,8 +219,8 @@ var File_tapstream_v1_dashboard_proto protoreflect.FileDescriptor
 
 const file_tapstream_v1_dashboard_proto_rawDesc = "" +
 	"\n" +
-	"\x1ctapstream/v1/dashboard.proto\x12\ftapstream.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"2\n" +
-	"\x10SubscribeRequest\x12\x1e\n" +
+	"\x1ctapstream/v1/dashboard.proto\x12\ftapstream.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"9\n" +
+	"\x17SubscribeUpdatesRequest\x12\x1e\n" +
 	"\n" +
 	"categories\x18\x01 \x03(\tR\n" +
 	"categories\"\xd4\x01\n" +
@@ -230,9 +235,9 @@ const file_tapstream_v1_dashboard_proto_rawDesc = "" +
 	"\bcategory\x18\x01 \x01(\tR\bcategory\x12$\n" +
 	"\x0eclicks_per_sec\x18\x02 \x01(\x01R\fclicksPerSec\x12$\n" +
 	"\x0eorders_per_sec\x18\x03 \x01(\x01R\fordersPerSec\x12&\n" +
-	"\x0frevenue_per_sec\x18\x04 \x01(\x01R\rrevenuePerSec2g\n" +
-	"\x10DashboardService\x12S\n" +
-	"\x10SubscribeUpdates\x12\x1e.tapstream.v1.SubscribeRequest\x1a\x1d.tapstream.v1.DashboardUpdate0\x01B\xba\x01\n" +
+	"\x0frevenue_per_sec\x18\x04 \x01(\x01R\rrevenuePerSec2n\n" +
+	"\x10DashboardService\x12Z\n" +
+	"\x10SubscribeUpdates\x12%.tapstream.v1.SubscribeUpdatesRequest\x1a\x1d.tapstream.v1.DashboardUpdate0\x01B\xba\x01\n" +
 	"\x10com.tapstream.v1B\x0eDashboardProtoP\x01ZEgithub.com/adityabansal/tapstream/server/gen/tapstream/v1;tapstreamv1\xa2\x02\x03TXX\xaa\x02\fTapstream.V1\xca\x02\fTapstream\\V1\xe2\x02\x18Tapstream\\V1\\GPBMetadata\xea\x02\rTapstream::V1b\x06proto3"
 
 var (
@@ -249,16 +254,16 @@ func file_tapstream_v1_dashboard_proto_rawDescGZIP() []byte {
 
 var file_tapstream_v1_dashboard_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_tapstream_v1_dashboard_proto_goTypes = []any{
-	(*SubscribeRequest)(nil),      // 0: tapstream.v1.SubscribeRequest
-	(*DashboardUpdate)(nil),       // 1: tapstream.v1.DashboardUpdate
-	(*CategoryStats)(nil),         // 2: tapstream.v1.CategoryStats
-	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
+	(*SubscribeUpdatesRequest)(nil), // 0: tapstream.v1.SubscribeUpdatesRequest
+	(*DashboardUpdate)(nil),         // 1: tapstream.v1.DashboardUpdate
+	(*CategoryStats)(nil),           // 2: tapstream.v1.CategoryStats
+	(*timestamppb.Timestamp)(nil),   // 3: google.protobuf.Timestamp
 }
 var file_tapstream_v1_dashboard_proto_depIdxs = []int32{
 	3, // 0: tapstream.v1.DashboardUpdate.ts:type_name -> google.protobuf.Timestamp
 	2, // 1: tapstream.v1.DashboardUpdate.total:type_name -> tapstream.v1.CategoryStats
 	2, // 2: tapstream.v1.DashboardUpdate.categories:type_name -> tapstream.v1.CategoryStats
-	0, // 3: tapstream.v1.DashboardService.SubscribeUpdates:input_type -> tapstream.v1.SubscribeRequest
+	0, // 3: tapstream.v1.DashboardService.SubscribeUpdates:input_type -> tapstream.v1.SubscribeUpdatesRequest
 	1, // 4: tapstream.v1.DashboardService.SubscribeUpdates:output_type -> tapstream.v1.DashboardUpdate
 	4, // [4:5] is the sub-list for method output_type
 	3, // [3:4] is the sub-list for method input_type

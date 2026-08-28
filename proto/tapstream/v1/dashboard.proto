@@ -8,10 +8,14 @@ import "google/protobuf/timestamp.proto";
 service DashboardService {
   // SubscribeUpdates streams one snapshot per aggregation tick until the
   // client disconnects.
-  rpc SubscribeUpdates(SubscribeRequest) returns (stream DashboardUpdate);
+  //
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // The response is a stream element rather than a reply, and DashboardUpdate
+  // describes what it is better than SubscribeUpdatesResponse would.
+  rpc SubscribeUpdates(SubscribeUpdatesRequest) returns (stream DashboardUpdate);
 }
 
-message SubscribeRequest {
+message SubscribeUpdatesRequest {
   // Categories to include. Empty means all of them.
   repeated string categories = 1;
 }
@@ -29,6 +33,11 @@ message DashboardUpdate {
   // subscription is the sum of the filtered set rather than of all traffic.
   CategoryStats total = 3;
 
+  // Only categories with activity in the window. A category that goes quiet
+  // is omitted entirely and reappears on its next event, so an absent
+  // category means a rate of zero, not missing data. Clients plotting a
+  // series must union the keys they have seen and substitute zero, or the
+  // lines will break and rejoin.
   repeated CategoryStats categories = 4;
 }
 

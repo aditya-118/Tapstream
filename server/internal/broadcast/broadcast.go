@@ -37,9 +37,14 @@ func (b *Broadcaster) Unsubscribe(ch chan *pb.DashboardUpdate) {
 }
 
 // Publish sends update to every subscriber, skipping any whose buffer is
-// full, and reports how many were skipped. Dropping is the right trade here:
-// the next update supersedes this one, so a stalled client should fall behind
-// rather than hold up the rest.
+// full, and reports how many were skipped. Dropping keeps one stalled client
+// from holding up the rest. Note that the buffer is a FIFO, so it is the
+// newest update that is dropped and the queued older ones that survive; that
+// is tolerable only because each update is a complete snapshot, so a
+// subscriber drains its backlog and renders the last one.
+//
+// Every subscriber receives the same *pb.DashboardUpdate. Concurrent reads
+// and marshalling are safe, but a published update must never be mutated.
 func (b *Broadcaster) Publish(update *pb.DashboardUpdate) (dropped int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
