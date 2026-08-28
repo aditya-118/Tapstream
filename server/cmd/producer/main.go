@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -42,8 +43,9 @@ func main() {
 	}
 
 	// Topic is set per message so one writer can serve both topics. Hashing on
-	// the key keeps a category's events on a single partition, which is what
-	// makes their relative order meaningful downstream.
+	// the key keeps a category's events on a single partition, which preserves
+	// their order within a topic. It says nothing about the order of a click
+	// relative to the order derived from it: those are different topics.
 	w := &kafka.Writer{
 		Addr:         kafka.TCP(strings.Split(*brokers, ",")...),
 		Balancer:     &kafka.Hash{},
@@ -115,12 +117,37 @@ func main() {
 					return
 				}
 				log.Printf("write: %v", err)
+				wroteClicks, wroteOrders := written(err, msgs, *clickTopic)
+				clicks += wroteClicks
+				orders += wroteOrders
 				continue
 			}
 			clicks += n
 			orders += batchOrders
 		}
 	}
+}
+
+// written reports how many messages of a failed batch actually reached Kafka,
+// split by topic. A batch spans several partitions, so a partial failure
+// returns a WriteErrors slice with a nil entry per message that succeeded;
+// counting the whole batch as lost would undercount.
+func written(err error, msgs []kafka.Message, clickTopic string) (clicks, orders int) {
+	var errs kafka.WriteErrors
+	if !errors.As(err, &errs) || len(errs) != len(msgs) {
+		return 0, 0
+	}
+	for i, e := range errs {
+		if e != nil {
+			continue
+		}
+		if msgs[i].Topic == clickTopic {
+			clicks++
+		} else {
+			orders++
+		}
+	}
+	return clicks, orders
 }
 
 func message(topic, key string, m proto.Message) kafka.Message {
